@@ -1,7 +1,6 @@
 import requests
 import hashlib
 
-# ========================== CONFIG ==========================
 API_KEY = "KCejQ3UJ3AyYTqs4EDuIsXPQbNHYlByO"
 API_URL = "https://api.mistral.ai/v1/chat/completions"
 
@@ -24,8 +23,6 @@ def ask_mistral(messages):
 def hash_code(code: str) -> str:
     return hashlib.sha256(code.strip().encode()).hexdigest()
 
-
-# ======================== INPUT CODE =========================
 
 code_to_analyze = """
 from flask import Flask, request
@@ -63,7 +60,6 @@ def delete_all_users():
 """
 
 
-# ===================== SCANNER AGENT PROMPT =====================
 
 scanner_prompt = [
     {
@@ -88,7 +84,6 @@ if "no vulnerabilities found" in scanner_output.strip().lower():
     exit()
 
 
-# ===================== FIXER AGENT PROMPT ======================
 
 def fix_code(code):
     fixer_prompt = [
@@ -113,8 +108,6 @@ def fix_code(code):
     return ask_mistral(fixer_prompt)
 
 
-# ==================== TESTER AGENT PROMPT ======================
-
 def test_code(code):
     tester_prompt = [
         {
@@ -131,8 +124,6 @@ def test_code(code):
     return ask_mistral(tester_prompt)
 
 
-# ================= FIXER–TESTER LOOP ==========================
-
 current_code = fix_code(scanner_output)
 prev_hash = ""
 max_iterations = 3
@@ -146,9 +137,6 @@ for _ in range(max_iterations):
     print("Applying fixes based on test feedback...")
     current_code = fix_code(current_code)
     prev_hash = current_hash
-
-
-# ==================== VALIDATOR AGENT PROMPT ===================
 
 validator_prompt = [
     {
@@ -164,8 +152,6 @@ validator_prompt = [
 ]
 print("Validate secure code...")
 final_code = ask_mistral(validator_prompt)
-
-# ========================= OUTPUT ============================
 
 print("\nCorrected Secure Code:\n")
 print(final_code.strip())
