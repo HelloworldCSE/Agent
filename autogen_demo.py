@@ -28,27 +28,38 @@ def hash_code(code: str) -> str:
 # ======================== INPUT CODE =========================
 
 code_to_analyze = """
-def get_user(username, password):
-    query = "SELECT * FROM users WHERE username = ? AND password = ?"
-    # Execute query with parameters
+from flask import Flask, request
+import sqlite3
 
-def set_password(user, password):
-    user.password_hash = generate_password_hash(password)
+app = Flask(__name__)
 
-@app.route('/admin/dashboard')
-def admin_dashboard():
-    if not session.get('is_admin'):
-        abort(403)
+@app.route('/login', methods=['POST'])
+def login():
+    username = request.form['username']
+    password = request.form['password']
 
-@app.route('/transfer_money', methods=['POST'])
-def transfer_money():
-    if request.method == 'POST':
-        pass
+    # ❌ Vulnerability: SQL Injection
+    query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
 
-@app.route('/comment/<post_id>')
-def comment(post_id):
-    comment = request.args.get('comment')
-    return render_template('comment.html', comment=comment)
+    conn = sqlite3.connect('app.db')
+    cursor = conn.cursor()
+    cursor.execute(query)
+    user = cursor.fetchone()
+
+    # ❌ Vulnerability: No password hashing
+    if user:
+        return "Login successful"
+    else:
+        return "Invalid credentials"
+
+@app.route('/admin/delete', methods=['GET'])
+def delete_all_users():
+    # ❌ Vulnerability: No authentication or authorization
+    conn = sqlite3.connect('app.db')
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM users")
+    conn.commit()
+    return "All users deleted"
 """
 
 
@@ -69,7 +80,7 @@ scanner_prompt = [
     },
     {"role": "user", "content": f"Scan this code:\n```python\n{code_to_analyze}\n```"}
 ]
-
+print("Starting security scan...")
 scanner_output = ask_mistral(scanner_prompt)
 
 if "no vulnerabilities found" in scanner_output.strip().lower():
@@ -90,15 +101,15 @@ def fix_code(code):
                 "- Add in-line comments **only where you fix** a security issue, using this format:\n"
                 "  # [FixerAgent]: explain the applied fix\n"
                 "- Use minimal and targeted changes that do not affect application behavior.\n\n"
-                "  Do NOT:\n"
-                "- Refactor the code.\n"
-                "- Rename functions or variables.\n"
-                "- Remove existing logic or restructure control flow.\n"
-                "- Add explanations outside the code.\n\n"
+                "- Do NOT Refactor the code.\n"
+                "- Do NOT Rename functions or variables.\n"
+                "- Do NOT Remove existing logic or restructure control flow.\n"
+                "- Do NOT Add explanations outside the code.\n\n"
                 "Assume that this file is used by other files and changes must not break compatibility."
         },
         {"role": "user", "content": f"Fix this code:\n```python\n{code}\n```"}
     ]
+    print("Starting code fixing...")
     return ask_mistral(fixer_prompt)
 
 
@@ -110,13 +121,13 @@ def test_code(code):
             "role": "system",
             "content":
                 "You are TesterAgent. Evaluate the fixed code and identify areas that require testing related only to the security vulnerabilities that were fixed.\n\n"
-                "If tests are needed, list brief test cases in plain lines (not test code).\n"
                 "If no testing is required, respond exactly with:\n"
                 "No additional test suggestions.\n\n"
                 "Do not modify or comment the code. Do not generate any code or explanations."
         },
         {"role": "user", "content": f"Here's the code:\n```python\n{code}\n```"}
     ]
+    print("Starting code testing...")
     return ask_mistral(tester_prompt)
 
 
@@ -132,7 +143,7 @@ for _ in range(max_iterations):
 
     if "no additional test suggestions" in test_output.strip().lower() or current_hash == prev_hash:
         break
-
+    print("Applying fixes based on test feedback...")
     current_code = fix_code(current_code)
     prev_hash = current_hash
 
@@ -151,7 +162,7 @@ validator_prompt = [
     },
     {"role": "user", "content": f"Please review this final version:\n```python\n{current_code}\n```"}
 ]
-
+print("Validate secure code...")
 final_code = ask_mistral(validator_prompt)
 
 # ========================= OUTPUT ============================

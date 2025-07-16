@@ -60,3 +60,6 @@ Final output with only secure, annotated code
 You now have a reliable, clean, and modular Mistral-powered AI agent flow that scans code for security, fixes it, suggests test cases, and validates the result — all while avoiding over-response and rate limits.
 
  Update prompts to say "part of larger codebase"	Helps AI to fix without altering names/structure
+
+
+ ![alt text](image-2.png)
