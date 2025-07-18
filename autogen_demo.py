@@ -1,9 +1,6 @@
 import requests
 import hashlib
 
-# ========================== CONFIG ==========================
-API_KEY = "KCejQ3UJ3AyYTqs4EDuIsXPQbNHYlByO"
-API_URL = "https://api.mistral.ai/v1/chat/completions"
 
 HEADERS = {
     "Authorization": f"Bearer {API_KEY}",
