@@ -1,183 +1,179 @@
+import os
 import requests
 import hashlib
+from typing import List, Dict
+from config import MISTRAL_API_KEY, MISTRAL_API_URL
 
+class MistralAPI:
+    def __init__(self, api_key: str, api_url: str):
+        self.api_key = api_key
+        self.api_url = api_url
+        self.headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
 
-HEADERS = {
-    "Authorization": f"Bearer {API_KEY}",
-    "Content-Type": "application/json"
-}
-
-def ask_mistral(messages):
-    payload = {
-        "model": "mistral-medium",
-        "messages": messages,
-        "temperature": 0.7,
-        "max_tokens": 1000
-    }
-    response = requests.post(API_URL, headers=HEADERS, json=payload)
-    response.raise_for_status()
-    try:
+    def ask(self, messages: List[Dict]) -> str:
+        payload = {
+            "model": "mistral-medium",
+            "messages": messages,
+            "temperature": 0.4,
+            "max_tokens": 1500
+        }
+        response = requests.post(self.api_url, headers=self.headers, json=payload)
+        response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
-    except (KeyError, IndexError):
-        return "[ERROR] Invalid response from Mistral."
+
 
 def hash_code(code: str) -> str:
     return hashlib.sha256(code.strip().encode()).hexdigest()
 
-# ======================== INPUT CODE =========================
-code_to_analyze = """from flask import Flask, request
-import sqlite3
-import hashlib
-import os
-import secrets
-from flask.templating import render_template_string
 
-app = Flask(__name__)
+def scan_code(api: MistralAPI, code: str) -> str:
+    scanner_prompt = [
+        {
+            "role": "system",
+            "content": (
+                "You are ScannerAgent, a security auditor. Your role is to analyze the provided code (in any language) for actual, exploitable vulnerabilities such as injection, broken authentication, insecure cryptography, or poor session handling.\n\n"
+                "Only reply with one of the following:\n"
+                "- 'No vulnerabilities found.' (exact string)\n"
+                "- The code with exact vulnerable lines copied and a short vulnerability reason above each one (in plain English, no comments or markdown).\n\n"
+                "You MUST NOT add, modify, or remove any code, comments, or structure.\n"
+                "You MUST NOT add any comments or explanations in the code.\n"
+                "You MUST NOT suggest improvements, formatting changes, or performance tips.\n"
+                "You MUST NOT rename, remove, or restructure any part of the code.\n\n"
+                "Presume the code may be integrated across a large codebase in any language. Only real threats should be flagged."
+            )
+        },
+        {"role": "user", "content": f"Scan this code:\n```\n{code}\n```"}
+    ]
+    print("Starting security scan...")
+    return api.ask(scanner_prompt)
 
-app.secret_key = os.urandom(24) # [FixerAgent]: Changed from fixed value to random generation
-app.config['SESSION_COOKIE_SECURE'] = True # [FixerAgent]: Ensure session cookies are secure
-app.config['SESSION_COOKIE_HTTPONLY'] = True # [FixerAgent]: Prevent JavaScript access to session cookie
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax' # [FixerAgent]: Add SameSite protection
 
-@app.route('/login', methods=['POST'])
-def login():
-    username = request.form.get('username', '').strip()
-    password = request.form.get('password', '').strip()
-
-    if not username or not password:
-        return render_template_string("Username and password are required"), 400 # [FixerAgent]: Use template rendering instead of direct string
-
-    query = "SELECT password FROM users WHERE username = ?"
-
-    conn = sqlite3.connect('app.db')
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT password, salt FROM users WHERE username = ?", (username,))
-    user_data = cursor.fetchone()
-    conn.close()
-
-    if user_data:
-        stored_password_hash, salt = user_data
-        input_password_hash = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 100000).hex()
-        if secrets.compare_digest(input_password_hash, stored_password_hash):
-            response = render_template_string("Login successful") # [FixerAgent]: Use template rendering instead of direct string
-            return response
-        else:
-            return render_template_string("Invalid credentials"), 401 # [FixerAgent]: Use template rendering and proper status code
-    else:
-        return render_template_string("Invalid credentials"), 401 # [FixerAgent]: Use template rendering and proper status code
-
-@app.route('/admin/delete', methods=['GET'])
-def delete_all_users():
-    if not secrets.compare_digest(request.headers.get('X-Admin-Key', ''), os.getenv('ADMIN_KEY', secrets.token_hex(32))): # [FixerAgent]: Use random default admin key
-        return render_template_string("Unauthorized"), 401 # [FixerAgent]: Use template rendering instead of direct string
-
-    if not request.is_secure:
-        return render_template_string("This operation requires HTTPS"), 403 # [FixerAgent]: Use template rendering instead of direct string
-
-    conn = sqlite3.connect('app.db')
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM users")
-    conn.commit()
-    conn.close()
-    return render_template_string("All users deleted") # [FixerAgent]: Use template rendering instead of direct string
-"""
-
-# ======================= SCANNER AGENT =======================
-scanner_prompt = [
-    {
-        "role": "system",
-        "content": (
-            "You are ScannerAgent. Objectively analyze the given Python code for real security vulnerabilities "
-            "such as SQL injection, XSS, broken authentication, insecure input handling, or poor error handling.\n\n"
-            "✅ If no real security vulnerabilities are found, reply exactly:\n"
-            "✅ No vulnerabilities found.\n\n"
-            "📌 If vulnerabilities exist, add only **in-line comments** like:\n"
-            "# [ScannerAgent]: Describe the exact vulnerability above the affected line\n\n"
-            "❌ Do NOT suggest performance, readability, or stylistic changes\n"
-            "❌ Do NOT rename functions, variables, or change logic"
-        )
-    },
-    {"role": "user", "content": f"Scan this code:\n```python\n{code_to_analyze}\n```"}
-]
-print("scan")
-scanner_output = ask_mistral(scanner_prompt)
-
-if "no vulnerabilities found" in scanner_output.strip().lower():
-    print("✅ No vulnerabilities found.")
-    exit()
-
-# ======================= FIXER AGENT =========================
-def fix_code(code):
+def fix_code(api: MistralAPI, code: str) -> str:
     fixer_prompt = [
         {
             "role": "system",
             "content": (
-                "You are FixerAgent. Fix ONLY the **security vulnerabilities** in the code while preserving all function names, logic, and external interface contracts.\n\n"
-                "✅ You MUST:\n"
-                "- Add only in-line fix comments like `# [FixerAgent]: your fix`\n"
-                "- Leave all business logic, function names, and parameters unchanged\n"
-                "- Focus on minimal secure code patches\n\n"
-                "❌ Do NOT rename functions, variables, or classes\n"
-                "❌ Do NOT refactor, reorder logic, or add docstrings\n"
-                "❌ Do NOT explain anything outside the code"
+                "You are FixerAgent. Your role is to resolve only confirmed security vulnerabilities present in the input code (in any language).\n\n"
+                "  You MUST:\n"
+                "- Preserve all function names, variable names, logic, and structure.\n"
+                "- Add in-line comments **only where you fix** a security issue, using this format:\n"
+                "  # [FixerAgent]: explain the applied fix\n"
+                "- Use minimal and targeted changes that do not affect application behavior.\n\n"
+                "- Do NOT refactor the code.\n"
+                "- Do NOT rename functions or variables.\n"
+                "- Do NOT remove existing logic or restructure control flow.\n"
+                "- Do NOT add explanations outside the code.\n"
+                "- Do NOT add comments except for the fixes you apply.\n\n"
+                "Assume that this file is used by other files and changes must not break compatibility."
             )
         },
-        {"role": "user", "content": f"Fix this code:\n```python\n{code}\n```"}
+        {"role": "user", "content": f"Fix this code:\n```\n{code}\n```"}
     ]
-    print("fix")
-    return ask_mistral(fixer_prompt)
+    print("Starting code fixing...")
+    return api.ask(fixer_prompt)
 
-# ======================= TESTER AGENT ========================
-def test_code(code):
+
+def test_code(api: MistralAPI, code: str) -> str:
     tester_prompt = [
         {
             "role": "system",
             "content": (
-                "You are TesterAgent. Suggest test cases for the fixed code, but only via **in-line test suggestions** "
-                "as comments like `# [TesterAgent]: test suggestion here`.\n\n"
-                "✅ Only suggest tests relevant to fixed security issues\n"
-                "❌ Do NOT write actual test code\n"
-                "❌ Do NOT suggest renaming, modifying, or refactoring\n"
-                "❌ If no tests are needed, reply exactly: No additional test suggestions."
+                "You are TesterAgent. Your role is to evaluate the fixed code and identify areas that require testing related only to the security vulnerabilities that were fixed.\n\n"
+                "If no testing is required, respond exactly with:\n"
+                "No additional test suggestions.\n\n"
+                "You MUST NOT modify, comment, or generate any code.\n"
+                "You MUST NOT add any comments or explanations in the code.\n"
+                "You MUST NOT add explanations outside the code."
             )
         },
-        {"role": "user", "content": f"Here's the code:\n```python\n{code}\n```"}
+        {"role": "user", "content": f"Here's the code:\n```\n{code}\n```"}
     ]
-    print("test")
-    return ask_mistral(tester_prompt)
+    print("Starting code testing...")
+    return api.ask(tester_prompt)
 
-# ========== LOOP FIXER <--> TESTER UNTIL NO MORE TEST INPUT ==========
-current_code = fix_code(scanner_output)
-prev_hash = ""
-max_iterations = 3
 
-for _ in range(max_iterations):
-    tested_code = test_code(current_code)
-    current_hash = hash_code(tested_code)
+def validate_code(api: MistralAPI, code: str) -> str:
+    validator_prompt = [
+        {
+            "role": "system",
+            "content": (
+                "You are ValidatorAgent. Your role is to finalize and return the complete, secure version of the code (in any language).\n\n"
+                "You MUST:\n"
+                "- Output the entire, corrected code file, not just the changes or a diff.\n"
+                "- Preserve all FixerAgent in-line comments.\n"
+                "- Make no functional changes except for confirmed security fixes.\n"
+                "- Do NOT alter logic, structure, or identifiers except as required for the security fix.\n"
+                "- Do NOT add, modify, or remove any comments except those added by FixerAgent.\n"
+                "- Do NOT re-comment, explain, or format.\n"
+                "Return the full code only, exactly as it should appear in production."
+            )
+        },
+        {"role": "user", "content": f"Please review this final version and return the complete, corrected code file:\n```\n{code}\n```"}
+    ]
+    print("Validate secure code...")
+    return api.ask(validator_prompt)
 
-    if "no additional test suggestions" in tested_code.strip().lower() or current_hash == prev_hash:
-        break
-    print("🔄 Iteration: Fixing code based on test suggestions...")
-    current_code = fix_code(tested_code)
-    prev_hash = current_hash
 
-# ====================== VALIDATOR AGENT ======================
-validator_prompt = [
-    {
-        "role": "system",
-        "content": (
-            "You are ValidatorAgent. Perform a final review and return the secure, validated code.\n\n"
-            "✅ Keep all previous in-line agent comments\n"
-            "✅ Return the code only (no docstrings, explanations, or markdown formatting)\n"
-            "❌ Do NOT modify the code or comment outside what’s already been done"
-        )
-    },
-    {"role": "user", "content": f"Please review this final version:\n```python\n{current_code}\n```"}
-]
-print("validate")
-final_code = ask_mistral(validator_prompt)
+def main():
+    api = MistralAPI(MISTRAL_API_KEY, MISTRAL_API_URL)
+    code_to_analyze = """
+from flask import Flask, request
+import sqlite3
 
-# ========================= OUTPUT ============================
-print("\n🔐 Final Reviewed Code:\n")
-print(final_code.strip())
+app = Flask(__name__)
+
+@app.route('/login', methods=['POST'])
+def login():
+    username = request.form['username']
+    password = request.form['password']
+
+    # Vulnerable to SQL Injection
+    query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
+
+    conn = sqlite3.connect('app.db')
+    cursor = conn.cursor()
+    cursor.execute(query)
+    user = cursor.fetchone()
+
+    if user:
+        return "Login successful"
+    else:
+        return "Invalid credentials"
+
+@app.route('/admin/delete', methods=['GET'])
+def delete_all_users():
+    conn = sqlite3.connect('app.db')
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM users")
+    conn.commit()
+    return "All users deleted"
+"""
+
+    scanner_output = scan_code(api, code_to_analyze)
+    if "no vulnerabilities found" in scanner_output.strip().lower():
+        print("No vulnerabilities found.")
+        return
+
+    current_code = fix_code(api, scanner_output)
+    prev_hash = ""
+    max_iterations = 3
+
+    for _ in range(max_iterations):
+        test_output = test_code(api, current_code)
+        current_hash = hash_code(test_output)
+        if "no additional test suggestions" in test_output.strip().lower() or current_hash == prev_hash:
+            break
+        print("Applying fixes based on test feedback...")
+        current_code = fix_code(api, current_code)
+        prev_hash = current_hash
+
+    final_code = validate_code(api, current_code)
+    print("\nCorrected Secure Code:\n")
+    print(final_code.strip())
+
+
+if __name__ == "__main__":
+    main() 
